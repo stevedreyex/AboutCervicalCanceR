@@ -1,0 +1,34 @@
+0,1,Age,年齡
+1,1,Number of sexual partners,性伴侣的数量
+2,1,First sexual intercourse (age),第一次性交(年齡)
+3,1,Num of pregnancies,懷孕次數
+4,0,Smokes,吸煙
+5,1,Smokes (years),吸煙（年）
+6,1,Smokes (packs/year),吸煙（包/年）
+7,0,Hormonal Contraceptives,激素類避孕藥具
+8,1,Hormonal Contraceptives (years),激素避孕藥（年）
+9,0,IUD,宮內節育器
+10,1,IUD (years),宮內節育器（年數）
+11,0,STDs,性傳播疾病
+12,1,STDs (number),STDs (number)
+13,0,STDs:condylomatosis,STDs:尖銳濕疣
+14,0,STDs:cervical condylomatosis,STDs:宮頸尖銳濕疣
+15,0,STDs:vaginal condylomatosis,STDs:陰道尖銳濕疣
+16,0,STDs:vulvo-perineal condylomatosis,STDs:會陰部尖銳濕疣
+17,0,STDs:syphilis,STDs:梅毒
+18,0,STDs:pelvic inflammatory disease,STDs:盆腔炎症
+19,0,STDs:genital herpes,STDs:生殖器皰疹
+20,0,STDs:molluscum contagiosum,性病：傳染性軟疣（Molluscum contagiosum
+21,0,STDs:AIDS,STDs:AIDS
+22,0,STDs:HIV,STDs:HIV
+23,0,STDs:Hepatitis B,STDs:B型肝炎
+24,0,STDs:HPV,STDs:HPV
+25,1,STDs: Number of diagnosis,性傳播疾病。診斷的數量
+28,0,Dx:Cancer,Dx:癌症
+29,0,Dx:CIN,Dx:CIN
+30,0,Dx:HPV,Dx:HPV
+31,0,Dx,Dx
+32,0,Hinselmann: target variable,Hinselmann: 目標變量
+33,0,Schiller: target variable,Schiller: 目標變量
+34,0,Cytology: target variable,細胞學：目標變量
+35,0,Biopsy: target variable,活組織檢查：目標變量

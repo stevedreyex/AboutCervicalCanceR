@@ -1,0 +1,179 @@
+---
+title: "FinalProjTeam6"
+output: html_document
+date: "`r Sys.Date()`"
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+2.  決定題目的方向:
+
+-   觀測對象與想要探索的現象 (關係)
+
+3.  基本資料分析 (資料視覺化) 在大數據的時代,
+    資料的整理與有意義訊息的呈現 (畫圖製表)越來越重要.
+4.  加入統計的思維進行進一步分析
+
+<!-- -->
+
+a.  思考(轉換後)變數的角色
+
+-   若想要建立模型, 區別response or explanatory variables
+-   response 可以不只一個
+-   模型亦可以有多個 (最後比較或進行選模)
+-   亦可以不區別變數角色, 單純的探討關聯性
+
+b.  套用統計方法時要先判斷變數型態 ("連續" 或是 "類別資料")
+
+-   蒐集到資料以後, 也有可能把連續變數以類別變數重新編碼
+    例如連續的年齡可以分類為 "青年" "中年" "老年"\
+
+c.  思考觀測值之個數 (樣本數)
+
+-   個數太少可能結果 "不顯著"
+
+d.  設計抽樣或是實驗方法
+e.  先對感興趣之關係做初步猜測 (建立假設)
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+cervical_cancer <- read.csv("cervical_cancer.csv", na.strings = "?")
+cervical_cancer
+```
+
+```{r}
+summary(cervical_cancer)
+```
+
+Comments: To answer the question "Is the distribution of data attached
+to the real-word scenario?", we could infer from the data that: The
+people who got cervical cancer (Dx.Cancer == 1) is 18 by the total data
+count(858 datas) and the mean of column.
+
+```{r}
+library(ggplot2)
+
+for (col in names(cervical_cancer)) {
+  if (is.numeric(cervical_cancer[[col]])) {
+    p <- ggplot(cervical_cancer, aes(x = !!sym(col))) +
+      geom_histogram()
+    print(p)
+  }
+}
+```
+
+Assumption: If the individual get sex in their early age
+(First.sexual.intercourse) , then they might have higher chance to get
+cervical cancer (Dx.Cancer)
+
+```{r}
+model <- glm(Dx.Cancer ~ First.sexual.intercourse, data = cervical_cancer, family = binomial)
+summary(model)
+```
+
+Comments: The model suggests that the age of first sexual intercourse
+(**`First.sexual.intercourse`**) has a statistically significant effect
+on the likelihood of having cervical cancer (**`Dx.Cancer`**). However,
+the relationship is relatively weak since the p-value (0.0524) is failed
+to reject the threshold of 0.05.
+
+```{r}
+# Split the data into two groups: with and without cervical cancer
+with_cancer <- cervical_cancer[cervical_cancer$Dx.Cancer == 1, ]
+without_cancer <- cervical_cancer[cervical_cancer$Dx.Cancer == 0, ]
+ignore = list("STDs..Time.since.first.diagnosis", "STDs..Time.since.last.diagnosis", "Dx.Cancer")
+
+# Initialize a list to store significant feature names
+significant_features <- list()
+
+# Loop through the columns and perform t-tests for numeric features
+for (col in names(cervical_cancer)) {
+  print(col)
+  if (col %in% ignore) next
+  if (is.numeric(cervical_cancer[[col]])) {
+    t_test_result <- t.test(with_cancer[[col]], without_cancer[[col]], na.rm = TRUE)
+    # Some value that is too small cannot compare may lead to NA    
+    if (is.na(t_test_result$p.value < 0.05) ||  t_test_result$p.value < 0.05) {
+      cat(col, "t-test result:\n")
+      print(t_test_result)
+      cat("\n")
+      
+      # Add the significant feature name to the list
+      significant_features <- append(significant_features, col)
+    }
+  }
+}
+
+# Print the list of significant features
+print(significant_features)
+# Perform F-test on the significant features
+
+# Create a formula for the F-test using the significant features
+f_test_formula <- as.formula(paste("Dx.Cancer ~", paste(significant_features, collapse = " + ")))
+
+# Fit a linear model using the formula
+f_test_model <- lm(f_test_formula, data = cervical_cancer)
+
+# Perform the F-test
+f_test_result <- anova(f_test_model)
+
+# Print the F-test result
+print(f_test_result)
+
+
+```
+
+```{r}
+# Run stepAIC with backward method on the significant features
+library(MASS)
+
+# Create a formula for the stepAIC using the significant features
+stepAIC_formula <- as.formula(paste("Dx.Cancer ~", paste(significant_features, collapse = " + ")))
+
+# Remove rows with missing values from the dataset
+cervical_cancer_clean <- na.omit(cervical_cancer)
+
+# Fit a logistic regression model using the formula and cleaned dataset
+stepAIC_model <- glm(stepAIC_formula, data = cervical_cancer_clean, family = binomial)
+
+# Perform stepAIC with backward method
+stepAIC_result <- stepAIC(stepAIC_model, direction = "backward")
+
+# Print the stepAIC result
+print(stepAIC_result)
+
+```
+
+```{r}
+library(MASS)
+
+# Remove the specified features from the dataset
+cervical_cancer <- cervical_cancer[, !(names(cervical_cancer) %in% c("STDs..Time.since.first.diagnosis", "STDs..Time.since.last.diagnosis"))]
+
+# Remove rows with missing values from the dataset
+cervical_cancer_clean <- na.omit(cervical_cancer)
+
+# Fit a full logistic regression model using the cleaned dataset
+full_model <- glm(Dx.Cancer ~ ., data = cervical_cancer_clean, family = binomial)
+
+# Perform stepAIC with backward method
+step_model <- stepAIC(full_model, direction = "backward")
+
+# Print the summary of the step_model
+summary(step_model)
+```
+TODO:
+
+1\. Plot the files\
+2. See Correlation\
+3. 果然還是要寫一堆幹話（見歷年proposal）\
+4. 像多少比例得病這種問題要答的出來（索取樣的對象是否為一般的『大眾』）
+
+ 
+# List all column names in this dataset
+names(cervical_cancer)
+
