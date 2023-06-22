@@ -177,3 +177,68 @@ TODO:
 # List all column names in this dataset
 names(cervical_cancer)
 
+cervical_cancer$Dx.Cancer <- factor(cervical_cancer$Dx.Cancer, levels = c(0, 1))
+cervical_cancer$Dx.CIN <- factor(cervical_cancer$Dx.CIN, levels = c(0, 1))
+cervical_cancer$Dx.HPV <- factor(cervical_cancer$Dx.HPV, levels = c(0, 1))
+cervical_cancer$Dx <- factor(cervical_cancer$Dx, levels = c(0, 1))
+cervical_cancer$Hinselmann <- factor(cervical_cancer$Hinselmann, levels = c(0, 1))
+cervical_cancer$Schiller <- factor(cervical_cancer$Schiller, levels = c(0, 1))
+cervical_cancer$Citology <- factor(cervical_cancer$Citology, levels = c(0, 1))
+cervical_cancer$Biopsy <- factor(cervical_cancer$Biopsy, levels = c(0, 1))
+
+TYPE_I = c("Age", "Number.of.sexual.partners", "Num.of.pregnancies")
+TYPE_II = c("First.sexual.intercourse", "Smokes", "Smokes..years.", "Hormonal.Contraceptives", "Hormonal.Contraceptives..years.", "IUD", "IUD..years.")
+TYPE_III = c("STDs..number.", "STDs.condylomatosis", "STDs.syphilis", "STDs.pelvic.inflammatory.disease", "STDs.genital.herpes", "STDs.molluscum.contagiosum", "STDs.AIDS", "STDs.HIV", "STDs.Hepatitis.B", "STDs.HPV", "STDs..Number.of.diagnosis")
+TYPE_IV = c("Dx.Cancer", "Dx.CIN", "Dx.HPV", "Hinselmann", "Schiller", "Citology", "Biopsy")
+
+for (IV in TYPE_IV) {
+  for (II in TYPE_II){
+    for (III in TYPE_III){
+      print(IV)
+      print(II)
+      print(III)
+      model <- try(aov(cervical_cancer[[IV]] ~ cervical_cancer[[II]] * cervical_cancer[[III]], data = cervical_cancer))
+      if(class(model) != "try-error"){
+        summary(model)
+      } else {
+        print(paste("Error in model.frame.default(formula = cervical_cancer$", IV, " ~ cervical_cancer$", II, " * cervical_cancer$", III, ":  invalid type (NULL) for variable 'cervical_cancer$", IV, "'", sep = ""))
+      }
+    }
+  }
+}
+
+ 
+# Visualize the data using ggplot2
+library(ggplot2)
+
+# Histogram of Age
+ggplot(cervical_cancer, aes(x = Age)) +
+  geom_histogram()
+
+# Histogram of Number of Sexual Partners
+ggplot(cervical_cancer, aes(x = Number.of.sexual.partners)) +
+  geom_histogram()
+
+# Histogram of Number of Pregnancies
+ggplot(cervical_cancer, aes(x = Num.of.pregnancies)) +
+  geom_histogram()
+
+# Scatter plot of Age and Number of Sexual Partners
+ggplot(cervical_cancer, aes(x = Age, y = Number.of.sexual.partners)) +
+  geom_point()
+
+# Scatter plot of Age and Number of Pregnancies
+ggplot(cervical_cancer, aes(x = Age, y = Num.of.pregnancies)) +
+  geom_point()
+
+# Scatter plot of Number of Sexual Partners and Number of Pregnancies
+ggplot(cervical_cancer, aes(x = Number.of.sexual.partners, y = Num.of.pregnancies)) +
+  geom_point()
+
+# Correlation matrix of numeric variables
+library(corrplot)
+numeric_vars <- sapply(cervical_cancer, is.numeric)
+corr_matrix <- cor(cervical_cancer[, numeric_vars])
+corrplot(corr_matrix, method = "circle")
+
+
