@@ -242,3 +242,33 @@ corr_matrix <- cor(cervical_cancer[, numeric_vars])
 corrplot(corr_matrix, method = "circle")
 
 
+```{r}
+ 
+# Split the dataset into training set and testing set
+library(caTools)
+set.seed(123)
+split <- sample.split(cervical_cancer$Dx.Cancer, SplitRatio = 0.7)
+train <- cervical_cancer[split, ]
+test <- cervical_cancer[!split, ]
+
+# Train by logistic regression
+logistic_model <- glm(Dx.Cancer ~ ., data = train, family = binomial)
+
+# Test the data and show the confusion matrix
+library(caret)
+predicted <- predict(logistic_model, newdata = test, type = "response")
+predicted <- ifelse(predicted > 0.5, 1, 0)
+ 
+# Replace NA in predicted to 0
+predicted[is.na(predicted)] <- 0
+ 
+# Transform predicted to a 1D simple matrix
+predicted <- as.list(predicted)
+
+
+
+confusionMatrix(predicted, test$Dx.Cancer)
+
+
+
+```
