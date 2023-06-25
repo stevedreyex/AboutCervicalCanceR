@@ -45,6 +45,8 @@ cervical_cancer <- read.csv("cervical_cancer.csv", na.strings = "?")
 cervical_cancer
 ```
 
+## Data Preview
+
 ```{r}
 summary(cervical_cancer)
 ```
@@ -53,6 +55,8 @@ Comments: To answer the question "Is the distribution of data attached
 to the real-word scenario?", we could infer from the data that: The
 people who got cervical cancer (Dx.Cancer == 1) is 18 by the total data
 count(858 datas) and the mean of column.
+
+### Plot the distribution
 
 ```{r}
 library(ggplot2)
@@ -70,6 +74,8 @@ Assumption: If the individual get sex in their early age
 (First.sexual.intercourse) , then they might have higher chance to get
 cervical cancer (Dx.Cancer)
 
+### Logistics predict Dx.cancer by First.sexual.intercourse
+
 ```{r}
 model <- glm(Dx.Cancer ~ First.sexual.intercourse, data = cervical_cancer, family = binomial)
 summary(model)
@@ -81,36 +87,116 @@ on the likelihood of having cervical cancer (**`Dx.Cancer`**). However,
 the relationship is relatively weak since the p-value (0.0524) is failed
 to reject the threshold of 0.05.
 
+TODO:
+
+1\. Plot the files\
+2. See Correlation\
+3. 像多少比例得病這種問題要答的出來（索取樣的對象是否為一般的『大眾』）
+
+## Full model logistic regression + stepAIC to get a smaller model
+
+```{r}
+library(MASS)
+
+# Remove the specified features from the dataset
+cervical_cancer <- cervical_cancer[, !(names(cervical_cancer) %in% c("STDs..Time.since.first.diagnosis", "STDs..Time.since.last.diagnosis", "STDs.AIDS", "STDs.cervical.condylomatosis"))]
+
+# Remove rows with missing values from the dataset
+cervical_cancer_clean <- na.omit(cervical_cancer)
+
+```
+
+### Get \`Cervical_cancer_clean\` done
+
+```{r}
+
+# Fit a full logistic regression model using the cleaned dataset
+full_model <- glm(Dx.Cancer ~ ., data = cervical_cancer_clean, family = binomial)
+
+# Perform stepAIC with backward method
+step_model <- stepAIC(full_model, direction = "backward")
+
+# Print the summary of the step_model
+summary(step_model)
+```
+
+## StepAIC model Fitted result
+
+View the summary of last fitted
+
+**The results are: Smokes + Smokes..years. + Dx.CIN + Dx.HPV + Dx**
+
+```{r}
+res = glm(formula = Dx.Cancer ~ Smokes + Smokes..years. + Dx.CIN + 
+    Dx.HPV + Dx, family = binomial, data = cervical_cancer_clean)
+summary(res)
+```
+
+```{r}
+library(MASS)
+
+library(caTools)
+set.seed(123)
+split <- sample.split(cervical_cancer_clean$Dx.Cancer, SplitRatio = 0.7)
+train <- cervical_cancer_clean[split, ]
+test <- cervical_cancer_clean[!split, ]
+
+# Train by logistic regression
+logistic_model <- glm(Dx.Cancer ~ ., data = train, family = binomial)
+
+# Test the data and show the confusion matrix
+library(caret)
+predicted <- predict(logistic_model, newdata = test, type = "response", na.action = na.pass)
+predicted <- ifelse(predicted > 0.5, 1, 0)
+predicted[is.na(predicted)] <- 0
+predicted <- factor(predicted, levels = c(0, 1))
+test$Dx.Cancer <- factor(test$Dx.Cancer, levels = c(0, 1))
+
+confusionMatrix(predicted, test$Dx.Cancer)
+
+# with(summary(res), 1-deviance/null.deviance)
+```
+
+## Doing T test first to select important feature then do backward selection
+
+Full model then do StepAIC may contains features that's not significant
+enough.
+
+**Filter w/ t-test then do StepAIC again.**
+
 ```{r}
 # Split the data into two groups: with and without cervical cancer
 with_cancer <- cervical_cancer[cervical_cancer$Dx.Cancer == 1, ]
 without_cancer <- cervical_cancer[cervical_cancer$Dx.Cancer == 0, ]
 ignore = list("STDs..Time.since.first.diagnosis", "STDs..Time.since.last.diagnosis", "Dx.Cancer")
-
-# Initialize a list to store significant feature names
 significant_features <- list()
-
 # Loop through the columns and perform t-tests for numeric features
 for (col in names(cervical_cancer)) {
-  print(col)
+  # print(col)
   if (col %in% ignore) next
   if (is.numeric(cervical_cancer[[col]])) {
     t_test_result <- t.test(with_cancer[[col]], without_cancer[[col]], na.rm = TRUE)
+#    cat(col, "t-test result:\n")
+#    print(t_test_result)
+#    cat("\n")
+#    print(t_test_result$p.value < 0.05)
     # Some value that is too small cannot compare may lead to NA    
     if (is.na(t_test_result$p.value < 0.05) ||  t_test_result$p.value < 0.05) {
       cat(col, "t-test result:\n")
       print(t_test_result)
       cat("\n")
-      
-      # Add the significant feature name to the list
       significant_features <- append(significant_features, col)
     }
   }
 }
-
-# Print the list of significant features
 print(significant_features)
-# Perform F-test on the significant features
+```
+
+## ANOVA after T-test
+
+```{r}
+# print(significant_features)
+# library(car)
 
 # Create a formula for the F-test using the significant features
 f_test_formula <- as.formula(paste("Dx.Cancer ~", paste(significant_features, collapse = " + ")))
@@ -123,60 +209,126 @@ f_test_result <- anova(f_test_model)
 
 # Print the F-test result
 print(f_test_result)
-
-
 ```
 
+### Logistic regression test by StepAIC after significant-T
+
 ```{r}
-# Run stepAIC with backward method on the significant features
 library(MASS)
 
 # Create a formula for the stepAIC using the significant features
 stepAIC_formula <- as.formula(paste("Dx.Cancer ~", paste(significant_features, collapse = " + ")))
 
+# Fit a logistic regression model using the formula
+stepAIC_model <- glm(stepAIC_formula, data = cervical_cancer, family = binomial)
+
 # Remove rows with missing values from the dataset
 cervical_cancer_clean <- na.omit(cervical_cancer)
 
+# Split the dataset into training set and testing set
+library(caTools)
+set.seed(123)
+split <- sample.split(cervical_cancer_clean$Dx.Cancer, SplitRatio = 0.7)
+train <- cervical_cancer_clean[split, ]
+test <- cervical_cancer_clean[!split, ]
 # Fit a logistic regression model using the formula and cleaned dataset
-stepAIC_model <- glm(stepAIC_formula, data = cervical_cancer_clean, family = binomial)
+stepAIC_model <- glm(stepAIC_formula, data = train, family = binomial)
 
-# Perform stepAIC with backward method
 stepAIC_result <- stepAIC(stepAIC_model, direction = "backward")
-
 # Print the stepAIC result
 print(stepAIC_result)
 
 ```
 
 ```{r}
+summary(train)
+```
+
+```{r}
+
 library(MASS)
 
 # Remove the specified features from the dataset
-cervical_cancer <- cervical_cancer[, !(names(cervical_cancer) %in% c("STDs..Time.since.first.diagnosis", "STDs..Time.since.last.diagnosis"))]
+cervical_cancer <- cervical_cancer[, !(names(cervical_cancer) %in% c("STDs..Time.since.first.diagnosis", "STDs..Time.since.last.diagnosis", "STDs.AIDS", "STDs.cervical.condylomatosis"))]
 
 # Remove rows with missing values from the dataset
 cervical_cancer_clean <- na.omit(cervical_cancer)
 
-# Fit a full logistic regression model using the cleaned dataset
-full_model <- glm(Dx.Cancer ~ ., data = cervical_cancer_clean, family = binomial)
+# Test the data and show the confusion matrix
+library(caret)
+predicted <- predict(stepAIC_model, newdata = test, type = "response")
+predicted <- ifelse(predicted > 0.5, 1, 0)
 
-# Perform stepAIC with backward method
-step_model <- stepAIC(full_model, direction = "backward")
+# Replace NA in predicted to 0
+predicted[is.na(predicted)] <- 0
+predicted <- factor(predicted, levels = c(0, 1))
+test$Dx.Cancer <- factor(test$Dx.Cancer, levels = c(0, 1))
 
-# Print the summary of the step_model
-summary(step_model)
+confusionMatrix(predicted, test$Dx.Cancer)
 ```
-TODO:
 
-1\. Plot the files\
-2. See Correlation\
-3. 果然還是要寫一堆幹話（見歷年proposal）\
-4. 像多少比例得病這種問題要答的出來（索取樣的對象是否為一般的『大眾』）
+# **Logistic regression in R with rare event data**
 
- 
-# List all column names in this dataset
+```{r}
+library(logistf)
+fit2<-logistf(data=cervical_cancer_clean, Dx.Cancer~Smokes + Smokes..years. + Dx.CIN + Dx.HPV + Dx, first=FALSE, pl=TRUE)
+summary(fit2)
+exp(coef(fit2))
+```
+
+Comment: idunno :)
+
+我真的看不出來這個解釋....看起來是係數大的表現好？
+
+## Two-Way ANOVA （but finally we use brute force）
+
+Separate features those into groups 1-4
+
+Make Some assumptions:
+
+a\. Women w/ IUD (宮內節育器) (Type II) has more chance to get
+STDs:pelvic inflammatory disease (STDs:盆腔炎症) (Type III)
+
+```{r}
+
+```
+
+b\. First sexual intercourse (age) (第一次性交(年齡)) (Type II ) in a
+younger age, more chances to get Cancer (Type IV)
+
+Hint: some other diseases may also concern w/ First sexual intercourse
+
+c\. 假設擁有較多性病的女性擁有子宮頸癌的機率較高 \<Compilcated\>
+
+d\. 假設年齡越大擁有子宮頸癌的機率較高
+
+e\. Brute force (Type IV) \~ (Type II) \* (Type III)
+
+```{r}
 names(cervical_cancer)
+```
 
+```{r}
+# Check factors with less than 2 levels
+dataset <- cervical_cancer # Replace 'cervical_cancer' with the actual name of your dataset
+
+# Get the column names of factors with less than 2 levels
+factors_with_less_than_2_levels <- names(dataset)[sapply(dataset, function(x) is.factor(x) && length(levels(x)) < 2)]
+
+# Print the factors with less than 2 levels
+cat("Factors with less than 2 levels:\n")
+cat(paste(factors_with_less_than_2_levels, collapse = ", "))
+
+```
+
+```{r}
+model <- aov(Dx.Cancer ~ First.sexual.intercourse * STDs..number., data = cervical_cancer)
+summary(model)
+```
+
+#### This is useless
+
+```{r}
 cervical_cancer$Dx.Cancer <- factor(cervical_cancer$Dx.Cancer, levels = c(0, 1))
 cervical_cancer$Dx.CIN <- factor(cervical_cancer$Dx.CIN, levels = c(0, 1))
 cervical_cancer$Dx.HPV <- factor(cervical_cancer$Dx.HPV, levels = c(0, 1))
@@ -206,69 +358,3849 @@ for (IV in TYPE_IV) {
     }
   }
 }
-
- 
-# Visualize the data using ggplot2
-library(ggplot2)
-
-# Histogram of Age
-ggplot(cervical_cancer, aes(x = Age)) +
-  geom_histogram()
-
-# Histogram of Number of Sexual Partners
-ggplot(cervical_cancer, aes(x = Number.of.sexual.partners)) +
-  geom_histogram()
-
-# Histogram of Number of Pregnancies
-ggplot(cervical_cancer, aes(x = Num.of.pregnancies)) +
-  geom_histogram()
-
-# Scatter plot of Age and Number of Sexual Partners
-ggplot(cervical_cancer, aes(x = Age, y = Number.of.sexual.partners)) +
-  geom_point()
-
-# Scatter plot of Age and Number of Pregnancies
-ggplot(cervical_cancer, aes(x = Age, y = Num.of.pregnancies)) +
-  geom_point()
-
-# Scatter plot of Number of Sexual Partners and Number of Pregnancies
-ggplot(cervical_cancer, aes(x = Number.of.sexual.partners, y = Num.of.pregnancies)) +
-  geom_point()
-
-# Correlation matrix of numeric variables
-library(corrplot)
-numeric_vars <- sapply(cervical_cancer, is.numeric)
-corr_matrix <- cor(cervical_cancer[, numeric_vars])
-corrplot(corr_matrix, method = "circle")
-
+```
 
 ```{r}
- 
-# Split the dataset into training set and testing set
-library(caTools)
-set.seed(123)
-split <- sample.split(cervical_cancer$Dx.Cancer, SplitRatio = 0.7)
-train <- cervical_cancer[split, ]
-test <- cervical_cancer[!split, ]
+model <- aov(First.sexual.intercourse ~ Smokes * STDs..number. , data = cervical_cancer)
+summary(model)
+```
 
-# Train by logistic regression
-logistic_model <- glm(Dx.Cancer ~ ., data = train, family = binomial)
+### Draw 2-way anova test graph
 
-# Test the data and show the confusion matrix
-library(caret)
-predicted <- predict(logistic_model, newdata = test, type = "response")
-predicted <- ifelse(predicted > 0.5, 1, 0)
- 
-# Replace NA in predicted to 0
-predicted[is.na(predicted)] <- 0
- 
-# Transform predicted to a 1D simple matrix
-predicted <- as.list(predicted)
+```{r}
+# Box plot with two factor variables
+boxplot(First.sexual.intercourse ~ Smokes * STDs..number., data=cervical_cancer, frame = FALSE, 
+        col = c("#00AFBB", "#E7B800"), ylab="First sexual intercourse")
+# Two-way interaction plot
+interaction.plot(x.factor = cervical_cancer$STDs..number., trace.factor = cervical_cancer$Smokes, 
+                 response = cervical_cancer$First.sexual.intercourse, fun = mean, 
+                 type = "b", legend = TRUE, 
+                 xlab = "STDs..number.", ylab="First sexual intercourse",
+                 pch=c(1,19), col = c("#00AFBB", "#E7B800"))
+```
 
+## Codegen Brute Force
 
+test this first
 
-confusionMatrix(predicted, test$Dx.Cancer)
+```{r}
+model <- aov( Dx.Cancer ~ First.sexual.intercourse * STDs..number., data = cervical_cancer)
+summary(model)
+```
 
+Then do the whole
+
+```{r}
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ First.sexual.intercourse * STDs..number., data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ First.sexual.intercourse * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ First.sexual.intercourse * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ First.sexual.intercourse * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ First.sexual.intercourse * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ First.sexual.intercourse * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ First.sexual.intercourse * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ First.sexual.intercourse * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ First.sexual.intercourse * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ First.sexual.intercourse * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ First.sexual.intercourse * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ Smokes * STDs..number., data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ Smokes * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ Smokes * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ Smokes * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ Smokes * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ Smokes * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ Smokes * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ Smokes * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ Smokes * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ Smokes * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ Smokes * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ Smokes..years. * STDs..number., data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ Smokes..years. * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ Smokes..years. * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ Smokes..years. * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ Smokes..years. * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ Smokes..years. * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ Smokes..years. * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ Smokes..years. * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ Smokes..years. * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ Smokes..years. * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ Smokes..years. * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ Hormonal.Contraceptives * STDs..number., data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ Hormonal.Contraceptives * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ Hormonal.Contraceptives * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ Hormonal.Contraceptives * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ Hormonal.Contraceptives * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ Hormonal.Contraceptives * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ Hormonal.Contraceptives * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ Hormonal.Contraceptives * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ Hormonal.Contraceptives * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ Hormonal.Contraceptives * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ Hormonal.Contraceptives * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ Hormonal.Contraceptives..years. * STDs..number., data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ Hormonal.Contraceptives..years. * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ Hormonal.Contraceptives..years. * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ Hormonal.Contraceptives..years. * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ Hormonal.Contraceptives..years. * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ Hormonal.Contraceptives..years. * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ Hormonal.Contraceptives..years. * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ Hormonal.Contraceptives..years. * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ Hormonal.Contraceptives..years. * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ Hormonal.Contraceptives..years. * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ Hormonal.Contraceptives..years. * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ IUD * STDs..number., data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ IUD * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ IUD * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ IUD * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ IUD * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ IUD * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ IUD * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ IUD * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ IUD * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ IUD * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ IUD * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ IUD..years. * STDs..number., data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ IUD..years. * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ IUD..years. * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ IUD..years. * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ IUD..years. * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ IUD..years. * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ IUD..years. * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ IUD..years. * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ IUD..years. * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ IUD..years. * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+print("Dx.Cancer")
+model <- aov( Dx.Cancer ~ IUD..years. * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ First.sexual.intercourse * STDs..number., data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ First.sexual.intercourse * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ First.sexual.intercourse * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ First.sexual.intercourse * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ First.sexual.intercourse * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ First.sexual.intercourse * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ First.sexual.intercourse * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ First.sexual.intercourse * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ First.sexual.intercourse * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ First.sexual.intercourse * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ First.sexual.intercourse * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ Smokes * STDs..number., data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ Smokes * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ Smokes * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ Smokes * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ Smokes * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ Smokes * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ Smokes * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ Smokes * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ Smokes * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ Smokes * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ Smokes * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ Smokes..years. * STDs..number., data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ Smokes..years. * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ Smokes..years. * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ Smokes..years. * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ Smokes..years. * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ Smokes..years. * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ Smokes..years. * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ Smokes..years. * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ Smokes..years. * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ Smokes..years. * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ Smokes..years. * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ Hormonal.Contraceptives * STDs..number., data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ Hormonal.Contraceptives * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ Hormonal.Contraceptives * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ Hormonal.Contraceptives * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ Hormonal.Contraceptives * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ Hormonal.Contraceptives * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ Hormonal.Contraceptives * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ Hormonal.Contraceptives * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ Hormonal.Contraceptives * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ Hormonal.Contraceptives * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ Hormonal.Contraceptives * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ Hormonal.Contraceptives..years. * STDs..number., data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ Hormonal.Contraceptives..years. * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ Hormonal.Contraceptives..years. * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ Hormonal.Contraceptives..years. * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ Hormonal.Contraceptives..years. * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ Hormonal.Contraceptives..years. * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ Hormonal.Contraceptives..years. * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ Hormonal.Contraceptives..years. * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ Hormonal.Contraceptives..years. * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ Hormonal.Contraceptives..years. * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ Hormonal.Contraceptives..years. * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ IUD * STDs..number., data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ IUD * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ IUD * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ IUD * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ IUD * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ IUD * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ IUD * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ IUD * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ IUD * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ IUD * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ IUD * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ IUD..years. * STDs..number., data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ IUD..years. * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ IUD..years. * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ IUD..years. * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ IUD..years. * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ IUD..years. * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ IUD..years. * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ IUD..years. * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ IUD..years. * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ IUD..years. * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+print("Dx.CIN")
+model <- aov( Dx.CIN ~ IUD..years. * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ First.sexual.intercourse * STDs..number., data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ First.sexual.intercourse * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ First.sexual.intercourse * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ First.sexual.intercourse * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ First.sexual.intercourse * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ First.sexual.intercourse * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ First.sexual.intercourse * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ First.sexual.intercourse * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ First.sexual.intercourse * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ First.sexual.intercourse * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ First.sexual.intercourse * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ Smokes * STDs..number., data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ Smokes * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ Smokes * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ Smokes * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ Smokes * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ Smokes * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ Smokes * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ Smokes * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ Smokes * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ Smokes * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ Smokes * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ Smokes..years. * STDs..number., data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ Smokes..years. * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ Smokes..years. * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ Smokes..years. * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ Smokes..years. * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ Smokes..years. * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ Smokes..years. * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ Smokes..years. * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ Smokes..years. * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ Smokes..years. * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ Smokes..years. * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ Hormonal.Contraceptives * STDs..number., data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ Hormonal.Contraceptives * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ Hormonal.Contraceptives * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ Hormonal.Contraceptives * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ Hormonal.Contraceptives * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ Hormonal.Contraceptives * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ Hormonal.Contraceptives * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ Hormonal.Contraceptives * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ Hormonal.Contraceptives * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ Hormonal.Contraceptives * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ Hormonal.Contraceptives * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ Hormonal.Contraceptives..years. * STDs..number., data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ Hormonal.Contraceptives..years. * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ Hormonal.Contraceptives..years. * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ Hormonal.Contraceptives..years. * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ Hormonal.Contraceptives..years. * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ Hormonal.Contraceptives..years. * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ Hormonal.Contraceptives..years. * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ Hormonal.Contraceptives..years. * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ Hormonal.Contraceptives..years. * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ Hormonal.Contraceptives..years. * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ Hormonal.Contraceptives..years. * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ IUD * STDs..number., data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ IUD * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ IUD * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ IUD * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ IUD * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ IUD * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ IUD * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ IUD * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ IUD * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ IUD * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ IUD * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ IUD..years. * STDs..number., data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ IUD..years. * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ IUD..years. * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ IUD..years. * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ IUD..years. * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ IUD..years. * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ IUD..years. * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ IUD..years. * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ IUD..years. * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ IUD..years. * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+print("Dx.HPV")
+model <- aov( Dx.HPV ~ IUD..years. * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ First.sexual.intercourse * STDs..number., data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ First.sexual.intercourse * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ First.sexual.intercourse * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ First.sexual.intercourse * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ First.sexual.intercourse * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ First.sexual.intercourse * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ First.sexual.intercourse * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ First.sexual.intercourse * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ First.sexual.intercourse * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ First.sexual.intercourse * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ First.sexual.intercourse * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ Smokes * STDs..number., data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ Smokes * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ Smokes * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ Smokes * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ Smokes * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ Smokes * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ Smokes * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ Smokes * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ Smokes * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ Smokes * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ Smokes * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ Smokes..years. * STDs..number., data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ Smokes..years. * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ Smokes..years. * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ Smokes..years. * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ Smokes..years. * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ Smokes..years. * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ Smokes..years. * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ Smokes..years. * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ Smokes..years. * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ Smokes..years. * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ Smokes..years. * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ Hormonal.Contraceptives * STDs..number., data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ Hormonal.Contraceptives * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ Hormonal.Contraceptives * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ Hormonal.Contraceptives * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ Hormonal.Contraceptives * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ Hormonal.Contraceptives * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ Hormonal.Contraceptives * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ Hormonal.Contraceptives * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ Hormonal.Contraceptives * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ Hormonal.Contraceptives * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ Hormonal.Contraceptives * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ Hormonal.Contraceptives..years. * STDs..number., data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ Hormonal.Contraceptives..years. * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ Hormonal.Contraceptives..years. * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ Hormonal.Contraceptives..years. * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ Hormonal.Contraceptives..years. * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ Hormonal.Contraceptives..years. * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ Hormonal.Contraceptives..years. * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ Hormonal.Contraceptives..years. * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ Hormonal.Contraceptives..years. * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ Hormonal.Contraceptives..years. * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ Hormonal.Contraceptives..years. * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ IUD * STDs..number., data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ IUD * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ IUD * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ IUD * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ IUD * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ IUD * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ IUD * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ IUD * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ IUD * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ IUD * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ IUD * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ IUD..years. * STDs..number., data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ IUD..years. * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ IUD..years. * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ IUD..years. * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ IUD..years. * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ IUD..years. * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ IUD..years. * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ IUD..years. * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ IUD..years. * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ IUD..years. * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+print("Hinselmann")
+model <- aov( Hinselmann ~ IUD..years. * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ First.sexual.intercourse * STDs..number., data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ First.sexual.intercourse * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ First.sexual.intercourse * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ First.sexual.intercourse * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ First.sexual.intercourse * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ First.sexual.intercourse * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ First.sexual.intercourse * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ First.sexual.intercourse * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ First.sexual.intercourse * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ First.sexual.intercourse * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ First.sexual.intercourse * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ Smokes * STDs..number., data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ Smokes * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ Smokes * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ Smokes * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ Smokes * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ Smokes * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ Smokes * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ Smokes * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ Smokes * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ Smokes * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ Smokes * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ Smokes..years. * STDs..number., data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ Smokes..years. * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ Smokes..years. * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ Smokes..years. * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ Smokes..years. * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ Smokes..years. * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ Smokes..years. * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ Smokes..years. * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ Smokes..years. * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ Smokes..years. * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ Smokes..years. * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ Hormonal.Contraceptives * STDs..number., data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ Hormonal.Contraceptives * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ Hormonal.Contraceptives * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ Hormonal.Contraceptives * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ Hormonal.Contraceptives * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ Hormonal.Contraceptives * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ Hormonal.Contraceptives * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ Hormonal.Contraceptives * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ Hormonal.Contraceptives * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ Hormonal.Contraceptives * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ Hormonal.Contraceptives * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ Hormonal.Contraceptives..years. * STDs..number., data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ Hormonal.Contraceptives..years. * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ Hormonal.Contraceptives..years. * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ Hormonal.Contraceptives..years. * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ Hormonal.Contraceptives..years. * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ Hormonal.Contraceptives..years. * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ Hormonal.Contraceptives..years. * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ Hormonal.Contraceptives..years. * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ Hormonal.Contraceptives..years. * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ Hormonal.Contraceptives..years. * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ Hormonal.Contraceptives..years. * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ IUD * STDs..number., data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ IUD * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ IUD * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ IUD * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ IUD * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ IUD * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ IUD * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ IUD * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ IUD * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ IUD * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ IUD * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ IUD..years. * STDs..number., data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ IUD..years. * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ IUD..years. * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ IUD..years. * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ IUD..years. * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ IUD..years. * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ IUD..years. * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ IUD..years. * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ IUD..years. * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ IUD..years. * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+print("Schiller")
+model <- aov( Schiller ~ IUD..years. * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ First.sexual.intercourse * STDs..number., data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ First.sexual.intercourse * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ First.sexual.intercourse * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ First.sexual.intercourse * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ First.sexual.intercourse * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ First.sexual.intercourse * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ First.sexual.intercourse * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ First.sexual.intercourse * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ First.sexual.intercourse * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ First.sexual.intercourse * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ First.sexual.intercourse * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ Smokes * STDs..number., data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ Smokes * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ Smokes * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ Smokes * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ Smokes * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ Smokes * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ Smokes * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ Smokes * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ Smokes * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ Smokes * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ Smokes * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ Smokes..years. * STDs..number., data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ Smokes..years. * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ Smokes..years. * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ Smokes..years. * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ Smokes..years. * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ Smokes..years. * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ Smokes..years. * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ Smokes..years. * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ Smokes..years. * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ Smokes..years. * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ Smokes..years. * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ Hormonal.Contraceptives * STDs..number., data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ Hormonal.Contraceptives * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ Hormonal.Contraceptives * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ Hormonal.Contraceptives * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ Hormonal.Contraceptives * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ Hormonal.Contraceptives * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ Hormonal.Contraceptives * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ Hormonal.Contraceptives * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ Hormonal.Contraceptives * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ Hormonal.Contraceptives * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ Hormonal.Contraceptives * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ Hormonal.Contraceptives..years. * STDs..number., data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ Hormonal.Contraceptives..years. * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ Hormonal.Contraceptives..years. * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ Hormonal.Contraceptives..years. * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ Hormonal.Contraceptives..years. * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ Hormonal.Contraceptives..years. * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ Hormonal.Contraceptives..years. * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ Hormonal.Contraceptives..years. * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ Hormonal.Contraceptives..years. * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ Hormonal.Contraceptives..years. * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ Hormonal.Contraceptives..years. * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ IUD * STDs..number., data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ IUD * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ IUD * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ IUD * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ IUD * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ IUD * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ IUD * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ IUD * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ IUD * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ IUD * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ IUD * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ IUD..years. * STDs..number., data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ IUD..years. * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ IUD..years. * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ IUD..years. * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ IUD..years. * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ IUD..years. * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ IUD..years. * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ IUD..years. * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ IUD..years. * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ IUD..years. * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+print("Citology")
+model <- aov( Citology ~ IUD..years. * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ First.sexual.intercourse * STDs..number., data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ First.sexual.intercourse * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ First.sexual.intercourse * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ First.sexual.intercourse * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ First.sexual.intercourse * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ First.sexual.intercourse * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ First.sexual.intercourse * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ First.sexual.intercourse * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ First.sexual.intercourse * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ First.sexual.intercourse * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ First.sexual.intercourse * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ Smokes * STDs..number., data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ Smokes * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ Smokes * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ Smokes * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ Smokes * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ Smokes * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ Smokes * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ Smokes * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ Smokes * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ Smokes * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ Smokes * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ Smokes..years. * STDs..number., data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ Smokes..years. * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ Smokes..years. * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ Smokes..years. * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ Smokes..years. * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ Smokes..years. * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ Smokes..years. * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ Smokes..years. * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ Smokes..years. * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ Smokes..years. * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ Smokes..years. * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ Hormonal.Contraceptives * STDs..number., data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ Hormonal.Contraceptives * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ Hormonal.Contraceptives * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ Hormonal.Contraceptives * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ Hormonal.Contraceptives * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ Hormonal.Contraceptives * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ Hormonal.Contraceptives * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ Hormonal.Contraceptives * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ Hormonal.Contraceptives * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ Hormonal.Contraceptives * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ Hormonal.Contraceptives * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ Hormonal.Contraceptives..years. * STDs..number., data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ Hormonal.Contraceptives..years. * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ Hormonal.Contraceptives..years. * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ Hormonal.Contraceptives..years. * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ Hormonal.Contraceptives..years. * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ Hormonal.Contraceptives..years. * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ Hormonal.Contraceptives..years. * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ Hormonal.Contraceptives..years. * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ Hormonal.Contraceptives..years. * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ Hormonal.Contraceptives..years. * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ Hormonal.Contraceptives..years. * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ IUD * STDs..number., data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ IUD * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ IUD * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ IUD * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ IUD * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ IUD * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ IUD * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ IUD * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ IUD * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ IUD * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ IUD * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ IUD..years. * STDs..number., data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ IUD..years. * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ IUD..years. * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ IUD..years. * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ IUD..years. * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ IUD..years. * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ IUD..years. * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ IUD..years. * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ IUD..years. * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ IUD..years. * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+print("Biopsy")
+model <- aov( Biopsy ~ IUD..years. * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
 
 
 ```
+
+Separately:
+
+Dx.Cancer
+
+```{r}
+model <- aov( Dx.Cancer ~ First.sexual.intercourse * STDs..number., data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ First.sexual.intercourse * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ First.sexual.intercourse * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ First.sexual.intercourse * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ First.sexual.intercourse * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ First.sexual.intercourse * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ First.sexual.intercourse * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ First.sexual.intercourse * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ First.sexual.intercourse * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ First.sexual.intercourse * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ First.sexual.intercourse * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ Smokes * STDs..number., data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ Smokes * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ Smokes * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ Smokes * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ Smokes * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ Smokes * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ Smokes * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ Smokes * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ Smokes * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ Smokes * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ Smokes * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ Smokes..years. * STDs..number., data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ Smokes..years. * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ Smokes..years. * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ Smokes..years. * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ Smokes..years. * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ Smokes..years. * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ Smokes..years. * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ Smokes..years. * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ Smokes..years. * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ Smokes..years. * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ Smokes..years. * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ Hormonal.Contraceptives * STDs..number., data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ Hormonal.Contraceptives * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ Hormonal.Contraceptives * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ Hormonal.Contraceptives * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ Hormonal.Contraceptives * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ Hormonal.Contraceptives * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ Hormonal.Contraceptives * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ Hormonal.Contraceptives * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ Hormonal.Contraceptives * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ Hormonal.Contraceptives * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ Hormonal.Contraceptives * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ Hormonal.Contraceptives..years. * STDs..number., data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ Hormonal.Contraceptives..years. * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ Hormonal.Contraceptives..years. * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ Hormonal.Contraceptives..years. * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ Hormonal.Contraceptives..years. * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ Hormonal.Contraceptives..years. * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ Hormonal.Contraceptives..years. * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ Hormonal.Contraceptives..years. * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ Hormonal.Contraceptives..years. * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ Hormonal.Contraceptives..years. * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ Hormonal.Contraceptives..years. * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ IUD * STDs..number., data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ IUD * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ IUD * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ IUD * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ IUD * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ IUD * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ IUD * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ IUD * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ IUD * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ IUD * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ IUD * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ IUD..years. * STDs..number., data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ IUD..years. * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ IUD..years. * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ IUD..years. * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ IUD..years. * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ IUD..years. * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ IUD..years. * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ IUD..years. * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ IUD..years. * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ IUD..years. * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.Cancer ~ IUD..years. * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+```
+
+Dx.CIN
+
+```{r}
+
+model <- aov( Dx.CIN ~ First.sexual.intercourse * STDs..number., data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ First.sexual.intercourse * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ First.sexual.intercourse * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ First.sexual.intercourse * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ First.sexual.intercourse * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ First.sexual.intercourse * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ First.sexual.intercourse * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ First.sexual.intercourse * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ First.sexual.intercourse * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ First.sexual.intercourse * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ First.sexual.intercourse * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ Smokes * STDs..number., data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ Smokes * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ Smokes * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ Smokes * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ Smokes * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ Smokes * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ Smokes * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ Smokes * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ Smokes * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ Smokes * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ Smokes * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ Smokes..years. * STDs..number., data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ Smokes..years. * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ Smokes..years. * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ Smokes..years. * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ Smokes..years. * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ Smokes..years. * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ Smokes..years. * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ Smokes..years. * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ Smokes..years. * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ Smokes..years. * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ Smokes..years. * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ Hormonal.Contraceptives * STDs..number., data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ Hormonal.Contraceptives * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ Hormonal.Contraceptives * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ Hormonal.Contraceptives * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ Hormonal.Contraceptives * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ Hormonal.Contraceptives * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ Hormonal.Contraceptives * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ Hormonal.Contraceptives * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ Hormonal.Contraceptives * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ Hormonal.Contraceptives * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ Hormonal.Contraceptives * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ Hormonal.Contraceptives..years. * STDs..number., data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ Hormonal.Contraceptives..years. * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ Hormonal.Contraceptives..years. * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ Hormonal.Contraceptives..years. * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ Hormonal.Contraceptives..years. * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ Hormonal.Contraceptives..years. * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ Hormonal.Contraceptives..years. * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ Hormonal.Contraceptives..years. * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ Hormonal.Contraceptives..years. * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ Hormonal.Contraceptives..years. * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ Hormonal.Contraceptives..years. * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ IUD * STDs..number., data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ IUD * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ IUD * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ IUD * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ IUD * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ IUD * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ IUD * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ IUD * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ IUD * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ IUD * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ IUD * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ IUD..years. * STDs..number., data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ IUD..years. * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ IUD..years. * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ IUD..years. * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ IUD..years. * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ IUD..years. * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ IUD..years. * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ IUD..years. * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ IUD..years. * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ IUD..years. * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.CIN ~ IUD..years. * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+```
+
+Dx.HPV
+
+```{r}
+
+model <- aov( Dx.HPV ~ First.sexual.intercourse * STDs..number., data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ First.sexual.intercourse * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ First.sexual.intercourse * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ First.sexual.intercourse * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ First.sexual.intercourse * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ First.sexual.intercourse * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ First.sexual.intercourse * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ First.sexual.intercourse * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ First.sexual.intercourse * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ First.sexual.intercourse * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ First.sexual.intercourse * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ Smokes * STDs..number., data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ Smokes * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ Smokes * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ Smokes * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ Smokes * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ Smokes * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ Smokes * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ Smokes * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ Smokes * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ Smokes * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ Smokes * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ Smokes..years. * STDs..number., data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ Smokes..years. * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ Smokes..years. * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ Smokes..years. * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ Smokes..years. * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ Smokes..years. * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ Smokes..years. * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ Smokes..years. * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ Smokes..years. * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ Smokes..years. * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ Smokes..years. * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ Hormonal.Contraceptives * STDs..number., data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ Hormonal.Contraceptives * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ Hormonal.Contraceptives * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ Hormonal.Contraceptives * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ Hormonal.Contraceptives * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ Hormonal.Contraceptives * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ Hormonal.Contraceptives * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ Hormonal.Contraceptives * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ Hormonal.Contraceptives * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ Hormonal.Contraceptives * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ Hormonal.Contraceptives * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ Hormonal.Contraceptives..years. * STDs..number., data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ Hormonal.Contraceptives..years. * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ Hormonal.Contraceptives..years. * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ Hormonal.Contraceptives..years. * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ Hormonal.Contraceptives..years. * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ Hormonal.Contraceptives..years. * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ Hormonal.Contraceptives..years. * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ Hormonal.Contraceptives..years. * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ Hormonal.Contraceptives..years. * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ Hormonal.Contraceptives..years. * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ Hormonal.Contraceptives..years. * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ IUD * STDs..number., data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ IUD * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ IUD * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ IUD * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ IUD * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ IUD * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ IUD * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ IUD * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ IUD * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ IUD * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ IUD * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ IUD..years. * STDs..number., data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ IUD..years. * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ IUD..years. * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ IUD..years. * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ IUD..years. * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ IUD..years. * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ IUD..years. * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ IUD..years. * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ IUD..years. * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ IUD..years. * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Dx.HPV ~ IUD..years. * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+```
+
+Hinselmann
+
+```{r}
+
+model <- aov( Hinselmann ~ First.sexual.intercourse * STDs..number., data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ First.sexual.intercourse * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ First.sexual.intercourse * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ First.sexual.intercourse * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ First.sexual.intercourse * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ First.sexual.intercourse * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ First.sexual.intercourse * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ First.sexual.intercourse * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ First.sexual.intercourse * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ First.sexual.intercourse * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ First.sexual.intercourse * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ Smokes * STDs..number., data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ Smokes * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ Smokes * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ Smokes * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ Smokes * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ Smokes * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ Smokes * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ Smokes * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ Smokes * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ Smokes * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ Smokes * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ Smokes..years. * STDs..number., data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ Smokes..years. * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ Smokes..years. * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ Smokes..years. * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ Smokes..years. * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ Smokes..years. * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ Smokes..years. * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ Smokes..years. * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ Smokes..years. * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ Smokes..years. * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ Smokes..years. * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ Hormonal.Contraceptives * STDs..number., data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ Hormonal.Contraceptives * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ Hormonal.Contraceptives * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ Hormonal.Contraceptives * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ Hormonal.Contraceptives * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ Hormonal.Contraceptives * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ Hormonal.Contraceptives * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ Hormonal.Contraceptives * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ Hormonal.Contraceptives * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ Hormonal.Contraceptives * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ Hormonal.Contraceptives * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ Hormonal.Contraceptives..years. * STDs..number., data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ Hormonal.Contraceptives..years. * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ Hormonal.Contraceptives..years. * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ Hormonal.Contraceptives..years. * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ Hormonal.Contraceptives..years. * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ Hormonal.Contraceptives..years. * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ Hormonal.Contraceptives..years. * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ Hormonal.Contraceptives..years. * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ Hormonal.Contraceptives..years. * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ Hormonal.Contraceptives..years. * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ Hormonal.Contraceptives..years. * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ IUD * STDs..number., data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ IUD * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ IUD * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ IUD * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ IUD * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ IUD * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ IUD * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ IUD * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ IUD * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ IUD * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ IUD * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ IUD..years. * STDs..number., data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ IUD..years. * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ IUD..years. * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ IUD..years. * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ IUD..years. * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ IUD..years. * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ IUD..years. * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ IUD..years. * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ IUD..years. * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ IUD..years. * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Hinselmann ~ IUD..years. * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+```
+
+Schiller
+
+```{r}
+
+model <- aov( Schiller ~ First.sexual.intercourse * STDs..number., data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ First.sexual.intercourse * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ First.sexual.intercourse * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ First.sexual.intercourse * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ First.sexual.intercourse * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ First.sexual.intercourse * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ First.sexual.intercourse * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ First.sexual.intercourse * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ First.sexual.intercourse * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ First.sexual.intercourse * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ First.sexual.intercourse * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ Smokes * STDs..number., data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ Smokes * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ Smokes * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ Smokes * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ Smokes * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ Smokes * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ Smokes * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ Smokes * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ Smokes * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ Smokes * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ Smokes * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ Smokes..years. * STDs..number., data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ Smokes..years. * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ Smokes..years. * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ Smokes..years. * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ Smokes..years. * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ Smokes..years. * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ Smokes..years. * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ Smokes..years. * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ Smokes..years. * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ Smokes..years. * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ Smokes..years. * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ Hormonal.Contraceptives * STDs..number., data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ Hormonal.Contraceptives * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ Hormonal.Contraceptives * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ Hormonal.Contraceptives * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ Hormonal.Contraceptives * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ Hormonal.Contraceptives * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ Hormonal.Contraceptives * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ Hormonal.Contraceptives * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ Hormonal.Contraceptives * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ Hormonal.Contraceptives * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ Hormonal.Contraceptives * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ Hormonal.Contraceptives..years. * STDs..number., data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ Hormonal.Contraceptives..years. * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ Hormonal.Contraceptives..years. * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ Hormonal.Contraceptives..years. * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ Hormonal.Contraceptives..years. * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ Hormonal.Contraceptives..years. * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ Hormonal.Contraceptives..years. * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ Hormonal.Contraceptives..years. * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ Hormonal.Contraceptives..years. * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ Hormonal.Contraceptives..years. * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ Hormonal.Contraceptives..years. * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ IUD * STDs..number., data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ IUD * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ IUD * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ IUD * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ IUD * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ IUD * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ IUD * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ IUD * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ IUD * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ IUD * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ IUD * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ IUD..years. * STDs..number., data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ IUD..years. * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ IUD..years. * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ IUD..years. * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ IUD..years. * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ IUD..years. * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ IUD..years. * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ IUD..years. * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ IUD..years. * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ IUD..years. * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Schiller ~ IUD..years. * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+```
+
+Citology
+
+```{r}
+
+model <- aov( Citology ~ First.sexual.intercourse * STDs..number., data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ First.sexual.intercourse * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ First.sexual.intercourse * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ First.sexual.intercourse * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ First.sexual.intercourse * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ First.sexual.intercourse * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ First.sexual.intercourse * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ First.sexual.intercourse * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ First.sexual.intercourse * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ First.sexual.intercourse * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ First.sexual.intercourse * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ Smokes * STDs..number., data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ Smokes * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ Smokes * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ Smokes * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ Smokes * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ Smokes * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ Smokes * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ Smokes * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ Smokes * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ Smokes * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ Smokes * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ Smokes..years. * STDs..number., data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ Smokes..years. * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ Smokes..years. * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ Smokes..years. * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ Smokes..years. * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ Smokes..years. * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ Smokes..years. * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ Smokes..years. * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ Smokes..years. * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ Smokes..years. * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ Smokes..years. * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ Hormonal.Contraceptives * STDs..number., data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ Hormonal.Contraceptives * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ Hormonal.Contraceptives * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ Hormonal.Contraceptives * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ Hormonal.Contraceptives * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ Hormonal.Contraceptives * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ Hormonal.Contraceptives * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ Hormonal.Contraceptives * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ Hormonal.Contraceptives * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ Hormonal.Contraceptives * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ Hormonal.Contraceptives * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ Hormonal.Contraceptives..years. * STDs..number., data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ Hormonal.Contraceptives..years. * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ Hormonal.Contraceptives..years. * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ Hormonal.Contraceptives..years. * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ Hormonal.Contraceptives..years. * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ Hormonal.Contraceptives..years. * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ Hormonal.Contraceptives..years. * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ Hormonal.Contraceptives..years. * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ Hormonal.Contraceptives..years. * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ Hormonal.Contraceptives..years. * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ Hormonal.Contraceptives..years. * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ IUD * STDs..number., data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ IUD * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ IUD * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ IUD * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ IUD * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ IUD * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ IUD * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ IUD * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ IUD * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ IUD * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ IUD * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ IUD..years. * STDs..number., data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ IUD..years. * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ IUD..years. * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ IUD..years. * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ IUD..years. * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ IUD..years. * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ IUD..years. * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ IUD..years. * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ IUD..years. * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ IUD..years. * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Citology ~ IUD..years. * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+```
+
+Biopsy
+
+```{r}
+
+model <- aov( Biopsy ~ First.sexual.intercourse * STDs..number., data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ First.sexual.intercourse * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ First.sexual.intercourse * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ First.sexual.intercourse * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ First.sexual.intercourse * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ First.sexual.intercourse * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ First.sexual.intercourse * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ First.sexual.intercourse * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ First.sexual.intercourse * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ First.sexual.intercourse * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ First.sexual.intercourse * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ Smokes * STDs..number., data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ Smokes * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ Smokes * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ Smokes * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ Smokes * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ Smokes * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ Smokes * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ Smokes * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ Smokes * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ Smokes * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ Smokes * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ Smokes..years. * STDs..number., data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ Smokes..years. * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ Smokes..years. * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ Smokes..years. * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ Smokes..years. * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ Smokes..years. * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ Smokes..years. * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ Smokes..years. * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ Smokes..years. * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ Smokes..years. * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ Smokes..years. * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ Hormonal.Contraceptives * STDs..number., data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ Hormonal.Contraceptives * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ Hormonal.Contraceptives * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ Hormonal.Contraceptives * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ Hormonal.Contraceptives * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ Hormonal.Contraceptives * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ Hormonal.Contraceptives * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ Hormonal.Contraceptives * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ Hormonal.Contraceptives * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ Hormonal.Contraceptives * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ Hormonal.Contraceptives * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ Hormonal.Contraceptives..years. * STDs..number., data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ Hormonal.Contraceptives..years. * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ Hormonal.Contraceptives..years. * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ Hormonal.Contraceptives..years. * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ Hormonal.Contraceptives..years. * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ Hormonal.Contraceptives..years. * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ Hormonal.Contraceptives..years. * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ Hormonal.Contraceptives..years. * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ Hormonal.Contraceptives..years. * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ Hormonal.Contraceptives..years. * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ Hormonal.Contraceptives..years. * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ IUD * STDs..number., data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ IUD * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ IUD * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ IUD * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ IUD * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ IUD * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ IUD * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ IUD * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ IUD * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ IUD * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ IUD * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ IUD..years. * STDs..number., data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ IUD..years. * STDs.condylomatosis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ IUD..years. * STDs.syphilis, data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ IUD..years. * STDs.pelvic.inflammatory.disease, data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ IUD..years. * STDs.genital.herpes, data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ IUD..years. * STDs.molluscum.contagiosum, data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ IUD..years. * STDs.AIDS, data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ IUD..years. * STDs.HIV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ IUD..years. * STDs.Hepatitis.B, data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ IUD..years. * STDs.HPV, data = cervical_cancer)
+summary(model)
+
+model <- aov( Biopsy ~ IUD..years. * STDs..Number.of.diagnosis, data = cervical_cancer)
+summary(model)
+```
+
+See log at file Significant.txt
